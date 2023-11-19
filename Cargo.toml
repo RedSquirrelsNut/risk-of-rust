@@ -1,0 +1,25 @@
+[package]
+name = "risk-of-rust"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+#NOTE: Remember to revert this before releasing your game! Otherwise you will need to include libbevy_dylib alongside your game if you want it to run. If you remove the "dynamic" feature, your game executable can run standalone.
+[dependencies]
+bevy = {version = "0.12.0", default-features = false, features = ["png", "multi-threaded", "serialize","bevy_winit", "bevy_ui", "bevy_sprite", "bevy_text", "bevy_scene", "bevy_render", "bevy_gizmos", "bevy_gilrs", "bevy_core_pipeline", "bevy_asset", "bevy_audio", "dynamic_linking"]}
+bevy_xpbd_2d = { version = "0.3.0", default-features = false, features = ["2d", "f32", "debug-plugin", "parallel"] } #Checkout the SIMD feature.
+# bevy_xpbd_2d = { git = "https://github.com/Jondolf/bevy_xpbd", branch = "main", default-features = false, features = ["2d", "f32", "debug-plugin"]}
+bevy-inspector-egui = "0.21.0"
+game_stat = {version = "0.2.2", default-features = false, features = ["serde", "sync"]}
+
+[workspace]
+resolver = "2"
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
