@@ -1,15 +1,16 @@
 use crate::engine::animation::{AnimationIndices, AnimationTimer};
 
 use bevy::{
+    math::*,
     prelude::*,
     transform::{commands, TransformSystem},
 };
-use bevy_xpbd_2d::math::Quaternion;
+use bevy_xpbd_2d::math::*;
 use bevy_xpbd_2d::plugins::spatial_query::ShapeCaster;
 use bevy_xpbd_2d::prelude::*;
 
-use super::physics_layers::Layer;
-use super::stats::*;
+use super::{physics_layers::Layer, player_controller::CharacterControllerPlugin};
+use super::{player_controller::CharacterControllerBundle, stats::*};
 use crate::{GameFont, Ground};
 
 #[derive(Event)]
@@ -124,47 +125,8 @@ impl PlayerStatBundle {
     }
 }
 
-#[derive(Bundle)]
-struct PlayerCollisionBundle {
-    body: RigidBody,
-    collider: Collider,
-    axis_lock: LockedAxes,
-    restitution: Restitution,
-    friciton: Friction,
-    col_layers: CollisionLayers,
-    sleep: SleepingDisabled,
-    ground_caster: ShapeCaster,
-}
-
-impl PlayerCollisionBundle {
-    pub fn new() -> Self {
-        Self {
-            body: RigidBody::Dynamic,
-            collider: Collider::cuboid(6.0, 11.0), //ball(7.5 as Scalar),
-            axis_lock: LockedAxes::new().lock_rotation(),
-            restitution: Restitution::new(0.0),
-            friciton: Friction::new(0.0),
-            col_layers: CollisionLayers::new([Layer::Player], [Layer::Ground]),
-            sleep: SleepingDisabled,
-            ground_caster: ShapeCaster::new(
-                Collider::cuboid(5.9, 10.9),
-                Vec2::NEG_Y * 0.05,
-                0.0,
-                Vec2::NEG_Y,
-            )
-            .with_max_time_of_impact(0.2)
-            .with_max_hits(1)
-            .with_query_filter(SpatialQueryFilter::new().with_masks([Layer::Ground])),
-        }
-    }
-}
-
 #[derive(Component)]
 pub struct Player;
-
-#[derive(Component)]
-#[component(storage = "SparseSet")]
-pub struct Grounded;
 
 pub fn spawn_player(
     mut commands: Commands,
@@ -196,28 +158,11 @@ pub fn spawn_player(
         PlayerXp::default(),
         PlayerLevel::default(),
         PlayerStatBundle::new(),
-        PlayerCollisionBundle::new(),
+        // PlayerCollisionBundle::new(),
+        CharacterControllerBundle::new(Collider::cuboid(6.0, 11.0), Vector::NEG_Y * 1000.0)
+            .with_movement(220.0, 0.92, 220.0, (30.0 as Scalar).to_radians()),
         Player,
     ));
-}
-
-pub fn detect_grounded(
-    mut commands: Commands,
-    mut hit_query: Query<(Entity, &ShapeCaster, &ShapeHits, &mut JumpsStat), With<Player>>,
-) {
-    let mut is_grounded = false;
-    for (player, _shape_caster, hits, mut jumps) in &mut hit_query {
-        for _hit in hits.iter() {
-            is_grounded = true;
-        }
-
-        if is_grounded {
-            commands.entity(player).insert(Grounded);
-            jumps.jumps_left = jumps.max_jumps;
-        } else {
-            commands.entity(player).remove::<Grounded>();
-        }
-    }
 }
 
 pub fn animate_player(
@@ -231,7 +176,7 @@ pub fn animate_player(
 ) {
     for (vel, indices, mut timer, mut sprite) in &mut query {
         if vel.x != 0.0 {
-            let dv = time.delta().mul_f32(vel.x.abs() / 20.0);
+            let dv = time.delta();
             timer.tick(dv);
             if timer.just_finished() {
                 sprite.index = if sprite.index == indices.last {
@@ -259,52 +204,17 @@ fn add_level(keyboard_input: Res<Input<KeyCode>>, mut player: Query<&mut PlayerX
     }
 }
 
-//FIXME: MAX JUMPS DOESNT DECREASE AFTER FIRST JUMP
-pub fn move_player(
-    // time: Res<Time>,
-    keyboard_input: Res<Input<KeyCode>>,
-    mut player: Query<
-        (
-            &mut LinearVelocity,
-            &SpeedStat,
-            &mut JumpsStat,
-            Has<Grounded>,
-        ),
-        With<Player>,
-    >,
-) {
-    // let delta_time = time.delta_seconds_f64().adjust_precision();
-    for (mut linear_velocity, player_speed, mut player_jump, is_grounded) in &mut player {
-        let player_speed = player_speed.0; // * time.delta_seconds(); //player_stats.speed.value();
-        let jump_height = player_jump.jump_height; // * time.delta_seconds();
-
-        linear_velocity.x = 0.0;
-
-        if keyboard_input.any_just_pressed([KeyCode::W, KeyCode::Up, KeyCode::Space])
-            && (is_grounded || (player_jump.jumps_left > 1))
-        {
-            // Use a higher acceleration for upwards movement to overcome gravity
-            linear_velocity.y = jump_height; //player_stats.jump_height.value();
-            player_jump.jumps_left -= 1;
-        }
-        if keyboard_input.any_pressed([KeyCode::A, KeyCode::Left]) {
-            linear_velocity.x = -player_speed;
-        }
-        if keyboard_input.any_pressed([KeyCode::D, KeyCode::Right]) {
-            linear_velocity.x = player_speed;
-        }
-    }
-}
-
 pub fn camera_follow(
-    mut camera_pos: Query<(&Camera2d, &mut Transform), Without<Player>>,
-    player_pos: Query<&Position, With<Player>>,
+    mut camera_pos: Query<&mut Transform, (Without<Player>, With<Camera>)>,
+    player_pos: Query<&Transform, With<Player>>,
 ) {
-    for player_position in &player_pos {
-        for (_, mut transform) in &mut camera_pos {
-            transform.translation.y = player_position.y;
-            transform.translation.x = player_position.x;
-        }
+    for player_transform in &player_pos {
+        let mut camera_transform = camera_pos.get_single_mut().unwrap();
+        camera_transform.translation = camera_transform
+            .translation
+            .truncate()
+            .lerp(player_transform.translation.truncate(), 0.1)
+            .extend(0.0);
     }
 }
 
@@ -315,19 +225,18 @@ impl Plugin for PlayerPlugin {
         app.register_type::<PlayerLevel>()
             .register_type::<PlayerXp>()
             .add_event::<LevelUpEvent>()
+            .add_plugins(CharacterControllerPlugin)
             .add_systems(Startup, spawn_player)
             .add_systems(
                 Update,
                 (
                     animate_player,
-                    move_player,
                     add_level,
-                    // camera_follow,
                     (
                         player_level_up,
                         reset_player_xp_level.run_if(on_event::<LevelUpEvent>()),
                         spawn_levelup_text.run_if(on_event::<LevelUpEvent>()),
-                        detect_grounded,
+                        // detect_grounded,
                     )
                         .chain(),
                     destroy_levelup_text,

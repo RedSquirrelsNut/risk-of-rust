@@ -27,8 +27,8 @@ pub const CLEAR_COLOR: Color = Color::rgb(0.270588, 0.266666, 0.309803);
 pub const TEXT_SCALE: f32 = 4.0;
 
 //GAME RESOLUTION
-pub const GAME_WIDTH: f32 = 320.; //240.0;
-pub const GAME_HEIGHT: f32 = 240.; //160.0;
+pub const GAME_WIDTH: f32 = 320.0; //480.; //320.; //240.0;
+pub const GAME_HEIGHT: f32 = 240.0; //360.; //240.; //160.0;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
@@ -62,8 +62,8 @@ fn main() {
         .add_state::<AppState>()
         .insert_resource(Msaa::Off)
         .insert_resource(ClearColor(CLEAR_COLOR))
-        .insert_resource(SubstepCount(6))
-        .insert_resource(Gravity(Vec2::NEG_Y * 300.0))
+        .insert_resource(SubstepCount(12))
+        .insert_resource(Gravity(Vec2::NEG_Y * 1000.0))
         .add_systems(PreStartup, setup)
         .add_systems(
             Startup,
@@ -133,6 +133,20 @@ fn spawn_temp_floor(mut commands: Commands, assets: Res<AssetServer>) {
         SpriteBundle {
             texture: assets.load("sprites/temp_floor.png"),
             transform: Transform::from_xyz(0.0, -232.0, 0.0),
+            ..Default::default()
+        },
+        RigidBody::Static,
+        Collider::cuboid(252.0, 14.0),
+        Friction::new(0.0),
+        CollisionLayers::new([Layer::Ground], [Layer::Player, Layer::Enemy]),
+    ));
+
+    commands.spawn((
+        Name::new("Temp_Floor"),
+        Ground,
+        SpriteBundle {
+            texture: assets.load("sprites/temp_floor.png"),
+            transform: Transform::from_xyz(252.0, -232.0, 0.0),
             ..Default::default()
         },
         RigidBody::Static,
