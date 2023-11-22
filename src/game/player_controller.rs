@@ -258,8 +258,10 @@ fn update_climbing(
             }
             if can_climb && should_climb {
                 commands.entity(entity).insert(Climbing);
+                commands.entity(entity).insert(Sensor);
             } else {
                 commands.entity(entity).remove::<Climbing>();
+                commands.entity(entity).remove::<Sensor>();
             }
         }
     }
@@ -268,19 +270,10 @@ fn update_climbing(
 fn check_can_climb(
     mut commands: Commands,
     spatial_query: SpatialQuery,
-    mut query: Query<
-        (
-            Entity,
-            &Collider,
-            &Position,
-            &mut ControllerGravity,
-            Has<Climbing>,
-        ),
-        With<CharacterController>,
-    >,
+    query: Query<(Entity, &Collider, &Position, Has<Climbing>), With<CharacterController>>,
 ) {
     let mut can_climb = false;
-    for (entity, collider, position, mut gravity, is_climbing) in &mut query {
+    for (entity, collider, position, is_climbing) in &query {
         let intersections = spatial_query.shape_intersections(
             &collider,                                                // Shape
             Vec2::new(position.x, position.y),                        // Shape position
@@ -297,12 +290,7 @@ fn check_can_climb(
         } else {
             commands.entity(entity).remove::<CanClimb>();
             commands.entity(entity).remove::<Climbing>();
-        }
-
-        if is_climbing {
-            gravity.0 = Vec2::new(0., 0.);
-        } else {
-            gravity.0 = Vector::NEG_Y * 1000.0;
+            commands.entity(entity).remove::<Sensor>();
         }
     }
 }
@@ -386,7 +374,8 @@ fn movement(
                 MovementAction::Climb(direction) => {
                     if is_climbing {
                         linear_velocity.x = 0.;
-                        linear_velocity.y += *direction * movement_acceleration.0 * delta_time;
+                        linear_velocity.y = 0.;
+                        position.y += *direction * movement_acceleration.0 * 0.25 * delta_time;
                     }
                 }
             }
@@ -397,14 +386,16 @@ fn movement(
 /// Applies [`ControllerGravity`] to character controllers.
 fn apply_gravity(
     time: Res<Time>,
-    mut controllers: Query<(&ControllerGravity, &mut LinearVelocity)>,
+    mut controllers: Query<(&ControllerGravity, &mut LinearVelocity, Has<Climbing>)>,
 ) {
     // Precision is adjusted so that the example works with
     // both the `f32` and `f64` features. Otherwise you don't need this.
     let delta_time = time.delta_seconds_f64().adjust_precision();
 
-    for (gravity, mut linear_velocity) in &mut controllers {
-        linear_velocity.0 += gravity.0 * delta_time;
+    for (gravity, mut linear_velocity, is_climbing) in &mut controllers {
+        if !is_climbing {
+            linear_velocity.0 += gravity.0 * delta_time;
+        }
     }
 }
 

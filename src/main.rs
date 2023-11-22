@@ -112,13 +112,13 @@ fn spawn_rope(mut commands: Commands) {
                 custom_size: Some(Vec2::new(2.0, 40.0)),
                 ..Default::default()
             },
-            transform: Transform::from_translation(Vec3::new(-20., -205., -2.)),
+            transform: Transform::from_translation(Vec3::new(-40., -190., -2.)),
             ..Default::default()
         },
         Climbable,
         Name::new("Rope"),
         Sensor,
-        Collider::cuboid(2.0, 40.0),
+        Collider::cuboid(0.1, 40.0),
         CollisionLayers::new([Layer::Climbable], []),
     ));
 }
@@ -132,7 +132,7 @@ fn spawn_temp_floor(mut commands: Commands, assets: Res<AssetServer>) {
         Ground,
         SpriteBundle {
             texture: assets.load("sprites/temp_floor.png"),
-            transform: Transform::from_xyz(0.0, -232.0, 0.0),
+            transform: Transform::from_xyz(0.0, -232.0, -3.0),
             ..Default::default()
         },
         RigidBody::Static,
@@ -146,7 +146,7 @@ fn spawn_temp_floor(mut commands: Commands, assets: Res<AssetServer>) {
         Ground,
         SpriteBundle {
             texture: assets.load("sprites/temp_floor.png"),
-            transform: Transform::from_xyz(252.0, -232.0, 0.0),
+            transform: Transform::from_xyz(0., -192.01, -3.0),
             ..Default::default()
         },
         RigidBody::Static,
