@@ -119,7 +119,7 @@ fn spawn_rope(mut commands: Commands) {
         Name::new("Rope"),
         Sensor,
         Collider::cuboid(2.0, 40.0),
-        CollisionLayers::new([Layer::Enemy], []),
+        CollisionLayers::new([Layer::Climbable], []),
     ));
 }
 

@@ -160,7 +160,7 @@ pub fn spawn_player(
         PlayerStatBundle::new(),
         // PlayerCollisionBundle::new(),
         CharacterControllerBundle::new(Collider::cuboid(6.0, 11.0), Vector::NEG_Y * 1000.0)
-            .with_movement(220.0, 0.92, 220.0, (30.0 as Scalar).to_radians()),
+            .with_movement(220.0, 0.92, 220.0, 1, (30.0 as Scalar).to_radians()),
         Player,
     ));
 }

@@ -4,5 +4,7 @@ pub use bevy_xpbd_2d::prelude::*;
 pub enum Layer {
     Player,
     Enemy,
+    Climbable,
+    Interactable,
     Ground,
 }

@@ -7,13 +7,16 @@ pub struct CharacterControllerPlugin;
 
 impl Plugin for CharacterControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<MovementAction>()
+        app.register_type::<JumpCount>()
+            .add_event::<MovementAction>()
             .add_systems(
                 Update,
                 (
                     keyboard_input,
                     gamepad_input,
                     update_grounded,
+                    check_can_climb,
+                    update_climbing,
                     apply_deferred,
                     apply_gravity,
                     movement,
@@ -34,6 +37,7 @@ impl Plugin for CharacterControllerPlugin {
 pub enum MovementAction {
     Move(Scalar),
     Jump,
+    Climb(Scalar),
 }
 
 /// A marker component indicating that an entity is using a character controller.
@@ -44,6 +48,17 @@ pub struct CharacterController;
 #[derive(Component)]
 #[component(storage = "SparseSet")]
 pub struct Grounded;
+
+/// A marker component indicating that an entity can climb (Climbing counts as grounded as well)
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct CanClimb;
+
+/// A marker component indicating that an entity is climbing (Climbing counts as grounded as well)
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct Climbing;
+
 /// The acceleration used for character movement.
 #[derive(Component)]
 pub struct MovementAcceleration(Scalar);
@@ -55,6 +70,18 @@ pub struct MovementDampingFactor(Scalar);
 /// The strength of a jump.
 #[derive(Component)]
 pub struct JumpImpulse(Scalar);
+
+#[derive(Component, Reflect)]
+pub struct JumpCount {
+    pub current: u32,
+    pub max: u32,
+}
+
+impl JumpCount {
+    pub fn new(max: u32) -> Self {
+        Self { current: 0, max }
+    }
+}
 
 /// The gravitational acceleration used for a character controller.
 #[derive(Component)]
@@ -86,20 +113,23 @@ pub struct MovementBundle {
     acceleration: MovementAcceleration,
     damping: MovementDampingFactor,
     jump_impulse: JumpImpulse,
+    jump_count: JumpCount,
     max_slope_angle: MaxSlopeAngle,
 }
 
 impl MovementBundle {
-    pub const fn new(
+    pub fn new(
         acceleration: Scalar,
         damping: Scalar,
         jump_impulse: Scalar,
+        jump_count: u32,
         max_slope_angle: Scalar,
     ) -> Self {
         Self {
             acceleration: MovementAcceleration(acceleration),
             damping: MovementDampingFactor(damping),
             jump_impulse: JumpImpulse(jump_impulse),
+            jump_count: JumpCount::new(jump_count),
             max_slope_angle: MaxSlopeAngle(max_slope_angle),
         }
     }
@@ -107,7 +137,7 @@ impl MovementBundle {
 
 impl Default for MovementBundle {
     fn default() -> Self {
-        Self::new(30.0, 0.9, 7.0, PI * 0.45)
+        Self::new(30.0, 0.9, 7.0, 1, PI * 0.45)
     }
 }
 
@@ -137,9 +167,16 @@ impl CharacterControllerBundle {
         acceleration: Scalar,
         damping: Scalar,
         jump_impulse: Scalar,
+        jump_count: u32,
         max_slope_angle: Scalar,
     ) -> Self {
-        self.movement = MovementBundle::new(acceleration, damping, jump_impulse, max_slope_angle);
+        self.movement = MovementBundle::new(
+            acceleration,
+            damping,
+            jump_impulse,
+            jump_count,
+            max_slope_angle,
+        );
         self
     }
 }
@@ -153,14 +190,24 @@ fn keyboard_input(
     let right = keyboard_input.any_pressed([KeyCode::D, KeyCode::Right]);
 
     let horizontal = right as i8 - left as i8;
-    let direction = horizontal as Scalar;
+    let h_direction = horizontal as Scalar;
 
-    if direction != 0.0 {
-        movement_event_writer.send(MovementAction::Move(direction));
+    if h_direction != 0.0 {
+        movement_event_writer.send(MovementAction::Move(h_direction));
     }
 
     if keyboard_input.just_pressed(KeyCode::Space) {
         movement_event_writer.send(MovementAction::Jump);
+    }
+
+    let up = keyboard_input.any_pressed([KeyCode::W, KeyCode::Up]);
+    let down = keyboard_input.any_pressed([KeyCode::S, KeyCode::Down]);
+
+    let vertical = up as i8 - down as i8;
+    let v_direction = vertical as Scalar;
+
+    if v_direction != 0.0 {
+        movement_event_writer.send(MovementAction::Climb(v_direction));
     }
 }
 
@@ -192,15 +239,90 @@ fn gamepad_input(
     }
 }
 
+fn update_climbing(
+    mut commands: Commands,
+    mut movement_event_reader: EventReader<MovementAction>,
+    query: Query<(Entity, Has<CanClimb>, Has<Climbing>), With<CharacterController>>,
+) {
+    for event in movement_event_reader.read() {
+        for (entity, can_climb, is_climbing) in &query {
+            let mut should_climb = is_climbing;
+            match event {
+                MovementAction::Climb(_) => {
+                    should_climb = true;
+                }
+                MovementAction::Jump => {
+                    should_climb = false;
+                }
+                _ => {}
+            }
+            if can_climb && should_climb {
+                commands.entity(entity).insert(Climbing);
+            } else {
+                commands.entity(entity).remove::<Climbing>();
+            }
+        }
+    }
+}
+
+fn check_can_climb(
+    mut commands: Commands,
+    spatial_query: SpatialQuery,
+    mut query: Query<
+        (
+            Entity,
+            &Collider,
+            &Position,
+            &mut ControllerGravity,
+            Has<Climbing>,
+        ),
+        With<CharacterController>,
+    >,
+) {
+    let mut can_climb = false;
+    for (entity, collider, position, mut gravity, is_climbing) in &mut query {
+        let intersections = spatial_query.shape_intersections(
+            &collider,                                                // Shape
+            Vec2::new(position.x, position.y),                        // Shape position
+            0.0,                                                      // Shape rotation
+            SpatialQueryFilter::new().with_masks([Layer::Climbable]), // Query filter
+        );
+
+        if let Some(_) = intersections.first() {
+            can_climb = true;
+        }
+
+        if can_climb {
+            commands.entity(entity).insert(CanClimb);
+        } else {
+            commands.entity(entity).remove::<CanClimb>();
+            commands.entity(entity).remove::<Climbing>();
+        }
+
+        if is_climbing {
+            gravity.0 = Vec2::new(0., 0.);
+        } else {
+            gravity.0 = Vector::NEG_Y * 1000.0;
+        }
+    }
+}
+
+//TODO: Jump count should have its own system?
 /// Updates the [`Grounded`] status for character controllers.
 fn update_grounded(
     mut commands: Commands,
     mut query: Query<
-        (Entity, &ShapeHits, &Rotation, Option<&MaxSlopeAngle>),
+        (
+            Entity,
+            &mut JumpCount,
+            &ShapeHits,
+            &Rotation,
+            Option<&MaxSlopeAngle>,
+        ),
         With<CharacterController>,
     >,
 ) {
-    for (entity, hits, rotation, max_slope_angle) in &mut query {
+    for (entity, mut jump_count, hits, rotation, max_slope_angle) in &mut query {
         // The character is grounded if the shape caster has a hit with a normal
         // that isn't too steep.
         let is_grounded = hits.iter().any(|hit| {
@@ -212,6 +334,7 @@ fn update_grounded(
         });
 
         if is_grounded {
+            jump_count.current = 0;
             commands.entity(entity).insert(Grounded);
         } else {
             commands.entity(entity).remove::<Grounded>();
@@ -226,8 +349,11 @@ fn movement(
     mut controllers: Query<(
         &MovementAcceleration,
         &JumpImpulse,
+        &mut JumpCount,
         &mut LinearVelocity,
+        &mut Position,
         Has<Grounded>,
+        Has<Climbing>,
     )>,
 ) {
     // Precision is adjusted so that the example works with
@@ -235,16 +361,32 @@ fn movement(
     let delta_time = time.delta_seconds_f64().adjust_precision();
 
     for event in movement_event_reader.read() {
-        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded) in
-            &mut controllers
+        for (
+            movement_acceleration,
+            jump_impulse,
+            mut jump_count,
+            mut linear_velocity,
+            mut position,
+            is_grounded,
+            is_climbing,
+        ) in &mut controllers
         {
             match event {
                 MovementAction::Move(direction) => {
-                    linear_velocity.x += *direction * movement_acceleration.0 * delta_time;
+                    if !is_climbing {
+                        linear_velocity.x += *direction * movement_acceleration.0 * delta_time;
+                    }
                 }
                 MovementAction::Jump => {
-                    if is_grounded {
+                    if is_grounded || is_climbing || jump_count.current < jump_count.max {
                         linear_velocity.y = jump_impulse.0;
+                        jump_count.current += 1;
+                    }
+                }
+                MovementAction::Climb(direction) => {
+                    if is_climbing {
+                        linear_velocity.x = 0.;
+                        linear_velocity.y += *direction * movement_acceleration.0 * delta_time;
                     }
                 }
             }
@@ -266,11 +408,18 @@ fn apply_gravity(
     }
 }
 
-/// Slows down movement in the X direction.
-fn apply_movement_damping(mut query: Query<(&MovementDampingFactor, &mut LinearVelocity)>) {
-    for (damping_factor, mut linear_velocity) in &mut query {
-        // We could use `LinearDamping`, but we don't want to dampen movement along the Y axis
-        linear_velocity.x *= damping_factor.0;
+/// Slows down movement in the X direction, Y if climbing.
+fn apply_movement_damping(
+    mut query: Query<(&MovementDampingFactor, &mut LinearVelocity, Has<Climbing>)>,
+) {
+    for (damping_factor, mut linear_velocity, is_climbing) in &mut query {
+        // We could use `LinearDamping`, but we don't want to dampen movement along the Y axis when
+        // not climbing.
+        if is_climbing {
+            linear_velocity.y *= damping_factor.0;
+        } else {
+            linear_velocity.x *= damping_factor.0;
+        }
     }
 }
 
